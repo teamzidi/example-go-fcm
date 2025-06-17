@@ -21,12 +21,12 @@ type PushTopicRequest struct {
 
 // PushTopicHandler は特定のFCMトピックへのPush通知を処理します。
 type PushTopicHandler struct {
-	fcmClient   fcm.FCMClientInterface
+	fcmClient   *fcm.FCMClient
 	deviceStore *store.DeviceStore
 }
 
 // NewPushTopicHandler は新しいPushTopicHandlerのインスタンスを作成します。
-func NewPushTopicHandler(fc fcm.FCMClientInterface, ds *store.DeviceStore) *PushTopicHandler {
+func NewPushTopicHandler(fc *fcm.FCMClient, ds *store.DeviceStore) *PushTopicHandler {
 	return &PushTopicHandler{
 		fcmClient:   fc,
 		deviceStore: ds,
@@ -97,9 +97,9 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 仮に、FCMClientInterface に Send(ctx, *messaging.Message) (string, error) が追加されたと想定
 	// messageID, err := h.fcmClient.Send(context.Background(), message) // このような呼び出しをしたい
 
-	// 現在のインターフェース fcm.FCMClientInterface には汎用的な Send(*messaging.Message) がない。
+	// 現在のインターフェース *fcm.FCMClient には汎用的な Send(*messaging.Message) がない。
 	// SendToToken はトークン専用、SendToMultipleTokensもトークン専用。
-	// トピック送信のためには fcm.go と fcm.FCMClientInterface の変更が必要。
+	// トピック送信のためには fcm.go と *fcm.FCMClient の変更が必要。
 	// このサブタスクでは、その変更が後ほど行われることを前提として、ロジックの骨子を記述する。
 	// **実際にはこのままではコンパイルエラーになるため、次のfcm.go調整ステップで解決する。**
 	// ここでは仮の成功として進める。
@@ -110,7 +110,7 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// --- ここまで仮実装 ---
 
 	// FCMClientInterface.Send を呼び出す (次のステップでインターフェースと実装を更新)
-	messageID, err := h.fcmClient.Send(context.Background(), message) // fcm.FCMClientInterface に Send メソッドを追加する必要あり
+	messageID, err := h.fcmClient.Send(context.Background(), message) // *fcm.FCMClient に Send メソッドを追加する必要あり
 	if err != nil {
 		log.Printf("PushTopicHandler: Error sending FCM message to topic %s: %v. Returning 503.\n", req.Topic, err)
 		http.Error(w, "Failed to send notification to topic via FCM", http.StatusServiceUnavailable)

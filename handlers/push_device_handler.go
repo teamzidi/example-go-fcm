@@ -20,12 +20,12 @@ type PushDeviceRequest struct {
 
 // PushDeviceHandler は特定のデバイストークン群へのPush通知を処理します。
 type PushDeviceHandler struct {
-	fcmClient   fcm.FCMClientInterface
+	fcmClient   *fcm.FCMClient
 	deviceStore *store.DeviceStore
 }
 
 // NewPushDeviceHandler は新しいPushDeviceHandlerのインスタンスを作成します。
-func NewPushDeviceHandler(fc fcm.FCMClientInterface, ds *store.DeviceStore) *PushDeviceHandler {
+func NewPushDeviceHandler(fc *fcm.FCMClient, ds *store.DeviceStore) *PushDeviceHandler {
 	return &PushDeviceHandler{
 		fcmClient:   fc,
 		deviceStore: ds,
