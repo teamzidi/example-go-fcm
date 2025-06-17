@@ -48,8 +48,6 @@ func main() {
 	log.Println("FCM client initialized.")
 
 	// Pub/Sub Pushハンドラの初期化
-	pushHandler := handlers.NewPushHandler(fcmClient, deviceStore)
-	log.Println("Pub/Sub Push handler initialized.")
 
 	// Pullサブスクライバの初期化と起動処理は削除
 	// subscriber, err := pubsub.NewSubscriber(ctx, projectID, pubsubSubscriptionID, fcmClient, deviceStore)
@@ -70,9 +68,12 @@ func main() {
 	// デバイストークン登録APIハンドラ (既存)
 	registrationHandler := handlers.NewRegistrationHandler(deviceStore)
 	mux.Handle("/register", registrationHandler)
-
-	// Pub/Sub Push受信用ハンドラ (新規)
-	mux.Handle("/pubsub/push", pushHandler) // パスは /pubsub/push とする
+	// Pub/Sub Push受信用ハンドラ (デバイス指定)
+	pushDeviceHandler := handlers.NewPushDeviceHandler(fcmClient, deviceStore)
+	mux.Handle("/pubsub/push/device", pushDeviceHandler)
+	// Pub/Sub Push受信用ハンドラ (トピック指定)
+	pushTopicHandler := handlers.NewPushTopicHandler(fcmClient, deviceStore)
+	mux.Handle("/pubsub/push/topic", pushTopicHandler)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
