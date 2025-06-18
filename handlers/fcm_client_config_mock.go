@@ -16,9 +16,9 @@ type fcmHandlerClient struct {
 	MockSendToTopic func(ctx context.Context, topic string, title string, body string, customData map[string]string) (string, error)
 }
 
-// newFcmHandlerClient は、FCMクライアントのインスタンスを生成します。
+// NewFcmHandlerClient は、FCMクライアントのインスタンスを生成します。
 // test_fcm_mock ビルド時は、モック版のFCMクライアントを生成します。
-func newFcmHandlerClient(ctx context.Context) (*fcmHandlerClient, error) {
+func NewFcmHandlerClient(ctx context.Context) (*fcmHandlerClient, error) {
 	log.Println("Using Mock FCMClient via handlers/fcm_client_config_mock.go (test_fcm_mock build tag is active)")
 	return &fcmHandlerClient{
 		MockSendToToken: func(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error) {
