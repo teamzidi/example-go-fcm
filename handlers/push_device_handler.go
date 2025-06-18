@@ -7,25 +7,26 @@ import (
 	"net/http"
 
 	"github.com/teamzidi/example-go-fcm/fcm"
-	"github.com/teamzidi/example-go-fcm/store" // store は直接使わないが、New関数のシグネチャを合わせるため残す
+	"github.com/teamzidi/example-go-fcm/store"
 )
 
-// PushDeviceRequest は /push/device エンドポイントのリクエストボディ構造体です。
+// PushDeviceRequest は /pubsub/push/device エンドポイントのリクエストボディ構造体です。
+// トークンは単一の文字列として受け取ります。
 type PushDeviceRequest struct {
 	Title      string            `json:"title"`
 	Body       string            `json:"body"`
-	Tokens     []string          `json:"tokens"`
+	Token      string            `json:"token"` // 単一トークンに変更
 	CustomData map[string]string `json:"custom_data,omitempty"`
 }
 
-// PushDeviceHandler は特定のデバイストークン群へのPush通知を処理します。
+// PushDeviceHandler は特定の単一デバイストークンへのPush通知を処理します。
 type PushDeviceHandler struct {
-	fcmClient   *fcm.FCMClient
+	fcmClient   *fcmHandlerClient
 	deviceStore *store.DeviceStore
 }
 
 // NewPushDeviceHandler は新しいPushDeviceHandlerのインスタンスを作成します。
-func NewPushDeviceHandler(fc *fcm.FCMClient, ds *store.DeviceStore) *PushDeviceHandler {
+func NewPushDeviceHandler(fc *fcmHandlerClient, ds *store.DeviceStore) *PushDeviceHandler {
 	return &PushDeviceHandler{
 		fcmClient:   fc,
 		deviceStore: ds,
@@ -58,41 +59,27 @@ func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Body is required", http.StatusBadRequest)
 		return
 	}
-	if len(req.Tokens) == 0 {
-		log.Println("PushDeviceHandler: Tokens list is required and cannot be empty")
-		http.Error(w, "Tokens list is required and cannot be empty", http.StatusBadRequest)
-		return
-	}
-	// FCMのSendMulticastは最大500トークンまでなので、必要に応じて分割処理を検討
-	// ここではバリデーションのみ
-	if len(req.Tokens) > 500 {
-		log.Println("PushDeviceHandler: Number of tokens exceeds maximum (500)")
-		http.Error(w, "Number of tokens exceeds maximum (500)", http.StatusBadRequest)
+	if req.Token == "" { // 単一トークンの空チェック
+		log.Println("PushDeviceHandler: Token is required")
+		http.Error(w, "Token is required", http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("PushDeviceHandler: Sending notification to device token '%s'. Title: '%s', Data: %v\n", req.Token, req.Title, req.CustomData)
 
-	log.Printf("PushDeviceHandler: Sending notification to %d devices. Title: '%s'\n", len(req.Tokens), req.Title)
-
-	// FCMメッセージの作成 (SendToMultipleTokensは title, body を直接取るので、Notificationオブジェクトは不要)
-	// もし custom_data を FCM の data payload に含めたい場合は、
-	// fcmClient.SendToMultipleTokens を変更するか、より汎用的な SendMulticastMessage を使うインターフェースに変更する必要がある。
-	// 今回は custom_data を FCM メッセージに含める部分は実装しないでおく。
-	// (FCMClientInterface とその実装も custom_data をサポートするように変更が必要になるためスコープを絞る)
-
-	br, err := h.fcmClient.SendToMultipleTokens(context.Background(), req.Tokens, req.Title, req.Body)
+	messageID, err := h.fcmClient.SendToToken(context.Background(), req.Token, req.Title, req.Body, req.CustomData)
 	if err != nil {
-		log.Printf("PushDeviceHandler: Error sending FCM messages: %v. Returning 503.\n", err)
-		http.Error(w, "Failed to send notifications via FCM", http.StatusServiceUnavailable)
+		log.Printf("PushDeviceHandler: Error sending FCM message to token %s: %v. Returning 503.\n", req.Token, err)
+		http.Error(w, "Failed to send notification via FCM", http.StatusServiceUnavailable)
 		return
 	}
 
-	log.Printf("PushDeviceHandler: Successfully processed request. FCM BatchResponse: SuccessCount: %d, FailureCount: %d\n", br.SuccessCount, br.FailureCount)
+	log.Printf("PushDeviceHandler: Successfully sent message ID %s to token %s\n", messageID, req.Token)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":            "processed",
-		"fcm_success_count": br.SuccessCount,
-		"fcm_failure_count": br.FailureCount,
+		"status":     "processed",
+		"message_id": messageID,
+		"token":      req.Token,
 	})
 }

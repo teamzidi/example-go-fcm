@@ -1,4 +1,4 @@
-package handlers
+package handlers // モック定義も同じパッケージなので _test サフィックスなし
 
 import (
 	"bytes"
@@ -9,41 +9,45 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"reflect" // DeepEqualのため
+	"reflect"
 
-	"firebase.google.com/go/v4/messaging"
-	"github.com/teamzidi/example-go-fcm/fcm"
+	// "github.com/teamzidi/example-go-fcm/fcm" // fcm パッケージは直接インポートしない
 	"github.com/teamzidi/example-go-fcm/store"
+	// "firebase.google.com/go/v4/messaging" // messaging.Message はモックの引数型としては不要になった
 )
+
+// 注意: このテストファイルが正しく動作するためには、
+// go test -tags=test_fcm_mock ./... のようにビルドタグを指定して実行し、
+// handlers/fcm_client_config_mock.go がビルドされるようにする必要がある。
 
 func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 	tests := []struct {
 		name                string
 		requestBody         PushTopicRequest
-		setupMock           func(mockFCM *fcm.FCMClient)
+		setupMock           func(mockFCM *fcmHandlerClient) // 型を *fcmHandlerClient に変更
 		expectedStatus      int
-		// expectedFCMCallCount int // 検証は setupMock 内で行うか、より詳細なフィールドを mockFCM に持たせる
 	}{
 		{
-			name: "Successful push to topic",
+			name: "Successful push to topic with custom data",
 			requestBody: PushTopicRequest{
 				Title: "Topic Test Title",
 				Body:  "Topic Test Body",
 				Topic: "test_topic",
-				CustomData: map[string]string{"key": "value"},
+				CustomData: map[string]string{"type": "topic_push", "id": "abc"},
 			},
-			setupMock: func(mockFCM *fcm.FCMClient) {
-				mockFCM.MockSend = func(ctx context.Context, msg *messaging.Message) (string, error) {
-					if msg.Topic != "test_topic" {
-						t.Errorf("Mock: Topic mismatch. Got %s, Want %s", msg.Topic, "test_topic")
+			setupMock: func(mockFCM *fcmHandlerClient) { // 型を *fcmHandlerClient に変更
+				mockFCM.MockSendToTopic = func(ctx context.Context, topic string, title string, body string, customData map[string]string) (string, error) {
+					if topic != "test_topic" {
+						t.Errorf("Mock: Topic mismatch. Got %s", topic)
 					}
-					if msg.Notification.Title != "Topic Test Title" {
-						t.Errorf("Mock: Title mismatch. Got %s, Want %s", msg.Notification.Title, "Topic Test Title")
+					if title != "Topic Test Title" {
+						t.Errorf("Mock: Title mismatch. Got %s", title)
 					}
-					if !reflect.DeepEqual(msg.Data, map[string]string{"key": "value"}) {
-						t.Errorf("Mock: Data mismatch. Got %v, Want %v", msg.Data, map[string]string{"key": "value"})
+					expectedData := map[string]string{"type": "topic_push", "id": "abc"}
+					if !reflect.DeepEqual(customData, expectedData) {
+						t.Errorf("Mock: CustomData mismatch. Got %v, want %v", customData, expectedData)
 					}
-					return "mock_message_id_topic", nil
+					return "mock_message_id_topic_custom", nil
 				}
 			},
 			expectedStatus: http.StatusOK,
@@ -55,8 +59,8 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 				Body:  "Topic Error Body",
 				Topic: "error_topic",
 			},
-			setupMock: func(mockFCM *fcm.FCMClient) {
-				mockFCM.MockSend = func(ctx context.Context, msg *messaging.Message) (string, error) {
+			setupMock: func(mockFCM *fcmHandlerClient) { // 型を *fcmHandlerClient に変更
+				mockFCM.MockSendToTopic = func(ctx context.Context, topic string, title string, body string, customData map[string]string) (string, error) {
 					return "", errors.New("FCM send to topic failed")
 				}
 			},
@@ -65,19 +69,19 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 		{
 			name:        "Missing title",
 			requestBody: PushTopicRequest{Body: "Body only", Topic: "t"},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call */ },
+			setupMock:   func(mockFCM *fcmHandlerClient) { /* No FCM call */ },
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:        "Missing body",
 			requestBody: PushTopicRequest{Title: "Title only", Topic: "t"},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call */ },
+			setupMock:   func(mockFCM *fcmHandlerClient) { /* No FCM call */ },
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:        "Missing topic",
 			requestBody: PushTopicRequest{Title: "Title", Body: "Body"},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call */ },
+			setupMock:   func(mockFCM *fcmHandlerClient) { /* No FCM call */ },
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
@@ -85,14 +89,18 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			deviceStore := store.NewDeviceStore()
-			mockFCMClient, err := fcm.NewFCMClient(context.Background())
+			// handlers パッケージ内の newFcmHandlerClient を呼び出す (ビルドタグで実体が切り替わる)
+			mockFCMClient, err := newFcmHandlerClient(context.Background())
 			if err != nil {
 				t.Fatalf("Failed to create mock FCMClient: %v", err)
 			}
 
-			originalMockSend := mockFCMClient.MockSend // 元のデフォルトモックを保持
-			tt.setupMock(mockFCMClient)
+			originalMockSendToTopic := mockFCMClient.MockSendToTopic
+			if tt.setupMock != nil {
+				tt.setupMock(mockFCMClient)
+			}
 
+			// NewPushTopicHandler は *fcmHandlerClient を受け取るように修正済みのはず
 			handler := NewPushTopicHandler(mockFCMClient, deviceStore)
 
 			reqBodyBytes, _ := json.Marshal(tt.requestBody)
@@ -105,18 +113,15 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 				t.Errorf("Status = %v, want %v. Body: %s", rr.Code, tt.expectedStatus, rr.Body.String())
 			}
 
-			mockFCMClient.MockSend = originalMockSend // モック関数を元に戻す
+			mockFCMClient.MockSendToTopic = originalMockSendToTopic
 		})
 	}
 }
 
-
-// Test for invalid HTTP method (内容は変更なし)
 func TestPushTopicHandler_ServeHTTP_InvalidMethod(t *testing.T) {
 	deviceStore := store.NewDeviceStore()
-	mockFCMClient, _ := fcm.NewFCMClient(context.Background())
+	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
 	handler := NewPushTopicHandler(mockFCMClient, deviceStore)
-
 	req := httptest.NewRequest(http.MethodGet, "/pubsub/push/topic", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -125,12 +130,10 @@ func TestPushTopicHandler_ServeHTTP_InvalidMethod(t *testing.T) {
 	}
 }
 
-// Test for invalid JSON body (内容は変更なし)
 func TestPushTopicHandler_ServeHTTP_InvalidJSON(t *testing.T) {
 	deviceStore := store.NewDeviceStore()
-	mockFCMClient, _ := fcm.NewFCMClient(context.Background())
+	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
 	handler := NewPushTopicHandler(mockFCMClient, deviceStore)
-
 	req := httptest.NewRequest(http.MethodPost, "/pubsub/push/topic", strings.NewReader("this is not json"))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/teamzidi/example-go-fcm/fcm"
 	"github.com/teamzidi/example-go-fcm/handlers"
 	"github.com/teamzidi/example-go-fcm/store"
 	// "github.com/teamzidi/example-go-fcm/pubsub" // ← 不要になるのでコメントアウトまたは削除
@@ -41,7 +40,7 @@ func main() {
 	log.Println("Device store initialized.")
 
 	// FCMクライアントの初期化
-	fcmClient, err := fcm.NewFCMClient(ctx)
+	fcmClient, err := handlers.newFcmHandlerClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to initialize FCM client: %v", err)
 	}

@@ -1,4 +1,4 @@
-package handlers
+package handlers // モック定義も同じパッケージなので _test サフィックスなし
 
 import (
 	"bytes"
@@ -9,83 +9,79 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	// "reflect" // reflect.DeepEqual を使う場合は必要
+	"reflect"
 
-	"firebase.google.com/go/v4/messaging"
-	"github.com/teamzidi/example-go-fcm/fcm" // fcm パッケージをインポート
+	// "github.com/teamzidi/example-go-fcm/fcm" // fcm パッケージは直接インポートしない
 	"github.com/teamzidi/example-go-fcm/store"
+	// firebase messaging はモックのシグネチャで直接は使わない
+	// "firebase.google.com/go/v4/messaging"
 )
+
+// 注意: このテストファイルが正しく動作するためには、
+// go test -tags=test_fcm_mock ./... のようにビルドタグを指定して実行し、
+// handlers/fcm_client_config_mock.go がビルドされるようにする必要がある。
 
 func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
 	tests := []struct {
-		name                 string
-		requestBody          PushDeviceRequest
-		setupMock            func(mockFCM *fcm.FCMClient) // モックの設定用関数
-		expectedStatus       int
-		// 検証用フィールド (テストケース内で直接検証するため、構造体からは削除してもよい)
-		// expectedFCMCallCount int
-		// expectedTokensSent   []string
-		// expectedTitleSent    string
-		// expectedBodySent     string
+		name                string
+		requestBody         PushDeviceRequest
+		setupMock           func(mockFCM *fcmHandlerClient) // 型を *fcmHandlerClient に変更
+		expectedStatus      int
 	}{
 		{
-			name: "Successful push to devices",
+			name: "Successful push to single device with custom data",
 			requestBody: PushDeviceRequest{
 				Title:  "Device Test Title",
 				Body:   "Device Test Body",
-				Tokens: []string{"dev_token1", "dev_token2"},
+				Token:  "dev_token1",
+				CustomData: map[string]string{"type": "device_push"},
 			},
-			setupMock: func(mockFCM *fcm.FCMClient) {
-				mockFCM.MockSendToMultipleTokens = func(ctx context.Context, tokens []string, title string, body string) (*messaging.BatchResponse, error) {
-					// 引数検証 (テスト内で直接行う方が柔軟性が高い場合もある)
+			setupMock: func(mockFCM *fcmHandlerClient) { // 型を *fcmHandlerClient に変更
+				mockFCM.MockSendToToken = func(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error) {
+					if token != "dev_token1" {
+						t.Errorf("Mock: Token mismatch. Got %s", token)
+					}
 					if title != "Device Test Title" {
-						t.Errorf("Mock: Title mismatch. Got %s, Want %s", title, "Device Test Title")
+						t.Errorf("Mock: Title mismatch. Got %s", title)
 					}
-					if body != "Device Test Body" {
-						t.Errorf("Mock: Body mismatch. Got %s, Want %s", body, "Device Test Body")
+					if !reflect.DeepEqual(customData, map[string]string{"type": "device_push"}) {
+						t.Errorf("Mock: CustomData mismatch. Got %v", customData)
 					}
-					// reflect.DeepEqual(tokens, []string{"dev_token1", "dev_token2"}) // 必要なら
-					return &messaging.BatchResponse{SuccessCount: len(tokens), FailureCount: 0}, nil
+					return "mock-message-id-single-device", nil
 				}
 			},
 			expectedStatus: http.StatusOK,
 		},
 		{
-			name: "FCM client returns error on device push",
+			name: "FCM client returns error on single device push",
 			requestBody: PushDeviceRequest{
 				Title:  "Device Error Title",
 				Body:   "Device Error Body",
-				Tokens: []string{"dev_token_err"},
+				Token:  "dev_token_err",
 			},
-			setupMock: func(mockFCM *fcm.FCMClient) {
-				mockFCM.MockSendToMultipleTokens = func(ctx context.Context, tokens []string, title string, body string) (*messaging.BatchResponse, error) {
-					return nil, errors.New("FCM send to devices failed")
+			setupMock: func(mockFCM *fcmHandlerClient) { // 型を *fcmHandlerClient に変更
+				mockFCM.MockSendToToken = func(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error) {
+					return "", errors.New("FCM send to device failed")
 				}
 			},
 			expectedStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name:        "Missing title",
-			requestBody: PushDeviceRequest{Body: "Body only", Tokens: []string{"t1"}},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call expected */ },
+			requestBody: PushDeviceRequest{Body: "Body only", Token: "t1"},
+			setupMock:   func(mockFCM *fcmHandlerClient) { /* No FCM call expected */ },
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:        "Missing body",
-			requestBody: PushDeviceRequest{Title: "Title only", Tokens: []string{"t1"}},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call expected */ },
+			requestBody: PushDeviceRequest{Title: "Title only", Token: "t1"},
+			setupMock:   func(mockFCM *fcmHandlerClient) { /* No FCM call expected */ },
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:        "Missing tokens",
-			requestBody: PushDeviceRequest{Title: "Title", Body: "Body", Tokens: []string{}},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call expected */ },
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:        "Too many tokens",
-			requestBody: PushDeviceRequest{Title: "Title", Body: "Body", Tokens: make([]string, 501)},
-			setupMock:   func(mockFCM *fcm.FCMClient) { /* No FCM call expected */ },
+			name:        "Missing token",
+			requestBody: PushDeviceRequest{Title: "Title", Body: "Body", Token: ""},
+			setupMock:   func(mockFCM *fcmHandlerClient) { /* No FCM call expected */ },
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
@@ -93,16 +89,18 @@ func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			deviceStore := store.NewDeviceStore()
-			// テスト実行時は test_fcm_mock タグによりモック版の NewFCMClient が呼ばれる
-			mockFCMClient, err := fcm.NewFCMClient(context.Background())
+			// handlers パッケージ内の newFcmHandlerClient を呼び出す (ビルドタグで実体が切り替わる)
+			mockFCMClient, err := newFcmHandlerClient(context.Background())
 			if err != nil {
 				t.Fatalf("Failed to create mock FCMClient: %v", err)
 			}
 
-			// モックの挙動を設定
-			originalMockSendToMultipleTokens := mockFCMClient.MockSendToMultipleTokens // 元のデフォルトモックを保持
-			tt.setupMock(mockFCMClient)
+			originalMockSendToToken := mockFCMClient.MockSendToToken
+			if tt.setupMock != nil {
+				tt.setupMock(mockFCMClient)
+			}
 
+			// NewPushDeviceHandler は *fcmHandlerClient を受け取るように修正済みのはず
 			handler := NewPushDeviceHandler(mockFCMClient, deviceStore)
 
 			reqBodyBytes, _ := json.Marshal(tt.requestBody)
@@ -115,19 +113,15 @@ func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
 				t.Errorf("Status = %v, want %v. Body: %s", rr.Code, tt.expectedStatus, rr.Body.String())
 			}
 
-			// モック関数を元に戻す (他のテストケースに影響を与えないため)
-			mockFCMClient.MockSendToMultipleTokens = originalMockSendToMultipleTokens
+			mockFCMClient.MockSendToToken = originalMockSendToToken
 		})
 	}
 }
 
-// Test for invalid HTTP method (内容は変更なし)
 func TestPushDeviceHandler_ServeHTTP_InvalidMethod(t *testing.T) {
 	deviceStore := store.NewDeviceStore()
-	// モッククライアントは呼ばれないはずなので、デフォルトのままでよい
-	mockFCMClient, _ := fcm.NewFCMClient(context.Background())
+	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
 	handler := NewPushDeviceHandler(mockFCMClient, deviceStore)
-
 	req := httptest.NewRequest(http.MethodGet, "/pubsub/push/device", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -136,12 +130,10 @@ func TestPushDeviceHandler_ServeHTTP_InvalidMethod(t *testing.T) {
 	}
 }
 
-// Test for invalid JSON body (内容は変更なし)
 func TestPushDeviceHandler_ServeHTTP_InvalidJSON(t *testing.T) {
 	deviceStore := store.NewDeviceStore()
-	mockFCMClient, _ := fcm.NewFCMClient(context.Background())
+	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
 	handler := NewPushDeviceHandler(mockFCMClient, deviceStore)
-
 	req := httptest.NewRequest(http.MethodPost, "/pubsub/push/device", strings.NewReader("this is not json"))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

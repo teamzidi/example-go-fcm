@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strings" // stringsパッケージをインポート
+	"strings"
 
 	"github.com/teamzidi/example-go-fcm/store"
 )

@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"firebase.google.com/go/v4/messaging" // messaging.Message を使うため
+	// "firebase.google.com/go/v4/messaging" // FCMClientのメソッド呼び出しに変わったため不要
 	"github.com/teamzidi/example-go-fcm/fcm"
 	"github.com/teamzidi/example-go-fcm/store"
 )
@@ -21,12 +21,12 @@ type PushTopicRequest struct {
 
 // PushTopicHandler は特定のFCMトピックへのPush通知を処理します。
 type PushTopicHandler struct {
-	fcmClient   *fcm.FCMClient
+	fcmClient   *fcmHandlerClient // インターフェースではなく具象型
 	deviceStore *store.DeviceStore
 }
 
 // NewPushTopicHandler は新しいPushTopicHandlerのインスタンスを作成します。
-func NewPushTopicHandler(fc *fcm.FCMClient, ds *store.DeviceStore) *PushTopicHandler {
+func NewPushTopicHandler(fc *fcmHandlerClient, ds *store.DeviceStore) *PushTopicHandler {
 	return &PushTopicHandler{
 		fcmClient:   fc,
 		deviceStore: ds,
@@ -48,7 +48,6 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// バリデーション
 	if req.Title == "" {
 		log.Println("PushTopicHandler: Title is required")
 		http.Error(w, "Title is required", http.StatusBadRequest)
@@ -64,59 +63,15 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Topic is required", http.StatusBadRequest)
 		return
 	}
-	// トピック名のバリデーション (例: `/topics/` プレフィックスはFCMが自動処理することが多いので、ここでは必須としない)
-	// 正規表現: [a-zA-Z0-9-_.~%]+
-	// ここでは簡単な空チェックのみ。より厳密なチェックも可能。
 
+	log.Printf("PushTopicHandler: Sending notification to topic '%s'. Title: '%s', Data: %v\n", req.Topic, req.Title, req.CustomData)
 
-	log.Printf("PushTopicHandler: Sending notification to topic '%s'. Title: '%s'\n", req.Topic, req.Title)
-
-	// FCMメッセージの作成
-	message := &messaging.Message{
-		Notification: &messaging.Notification{
-			Title: req.Title,
-			Body:  req.Body,
-		},
-		Data:  req.CustomData, // custom_data を FCM の data payload に設定
-		Topic: req.Topic,
-	}
-
-	// fcmClientインターフェースに汎用的なSendメソッドがあると仮定する。
-	// もし SendToTopicのような特化メソッドがインターフェースにあればそれを使う。
-	// ここでは、FCMClientInterface に Send(ctx, message) があると想定し、
-	// その Send が内部で message.Topic を見て適切に処理すると期待する。
-	// そのためには、fcm.FCMClient の SendToToken を Send にリネームまたはラップする必要があるかもしれない。
-	// → FCMClientInterface には SendToToken と SendToMultipleTokens がある。
-	//   トピック送信のためには、messaging.Message を受け取る Send メソッドをインターフェースに追加するか、
-	//   SendToTopicのようなメソッドを新設する必要がある。
-	//   今回は、fcm.goのFCMClientに Send(ctx, *messaging.Message)string, error を追加し、
-	//   それをインターフェースにも追加する、という変更を後続のfcm/fcm.goの調整ステップで行うこととする。
-	//   ここでは、そのメソッドが利用可能であると仮定して進める。
-	//   ※ fcm.FCMClient.Send(ctx, message) を呼び出す形を想定。
-
-	// 仮に、FCMClientInterface に Send(ctx, *messaging.Message) (string, error) が追加されたと想定
-	// messageID, err := h.fcmClient.Send(context.Background(), message) // このような呼び出しをしたい
-
-	// 現在のインターフェース *fcm.FCMClient には汎用的な Send(*messaging.Message) がない。
-	// SendToToken はトークン専用、SendToMultipleTokensもトークン専用。
-	// トピック送信のためには fcm.go と *fcm.FCMClient の変更が必要。
-	// このサブタスクでは、その変更が後ほど行われることを前提として、ロジックの骨子を記述する。
-	// **実際にはこのままではコンパイルエラーになるため、次のfcm.go調整ステップで解決する。**
-	// ここでは仮の成功として進める。
-
-	// --- ここから仮実装 ---
-	// 本来は fcmClient.Send(ctx, message) を呼びたい
-	// log.Printf("PushTopicHandler: (仮) FCM Send to topic %s would be called here.\n", req.Topic)
-	// --- ここまで仮実装 ---
-
-	// FCMClientInterface.Send を呼び出す (次のステップでインターフェースと実装を更新)
-	messageID, err := h.fcmClient.Send(context.Background(), message) // *fcm.FCMClient に Send メソッドを追加する必要あり
+	messageID, err := h.fcmClient.SendToTopic(context.Background(), req.Topic, req.Title, req.Body, req.CustomData) // customData を渡す
 	if err != nil {
 		log.Printf("PushTopicHandler: Error sending FCM message to topic %s: %v. Returning 503.\n", req.Topic, err)
 		http.Error(w, "Failed to send notification to topic via FCM", http.StatusServiceUnavailable)
 		return
 	}
-
 
 	log.Printf("PushTopicHandler: Successfully sent message ID %s to topic %s\n", messageID, req.Topic)
 	w.Header().Set("Content-Type", "application/json")
