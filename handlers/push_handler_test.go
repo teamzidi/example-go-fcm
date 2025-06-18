@@ -13,8 +13,6 @@ import (
 	"testing"
 
 	"firebase.google.com/go/v4/messaging" // messagingパッケージをインポート
-	"github.com/teamzidi/example-go-fcm/fcm"   // fcmパッケージをインポート
-	"github.com/teamzidi/example-go-fcm/store"
 )
 
 // MockFCMClient は fcm.FCMClientInterface のモック実装です。
@@ -102,8 +100,8 @@ func TestPushHandler_ServeHTTP(t *testing.T) {
 				Subscription: "sub1",
 			},
 			setupStore:           func(ds *store.DeviceStore) {}, // No tokens
-			expectedStatus:       http.StatusOK,                 // Acked
-			expectedFCMCallCount: 0,                             // FCM should not be called
+			expectedStatus:       http.StatusOK,                  // Acked
+			expectedFCMCallCount: 0,                              // FCM should not be called
 			expectedJSONResponse: map[string]interface{}{"status": "acknowledged", "reason": "no registered devices"},
 		},
 		{

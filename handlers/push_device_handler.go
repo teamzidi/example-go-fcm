@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-
-	"github.com/teamzidi/example-go-fcm/fcm"
-	// "github.com/teamzidi/example-go-fcm/store" // storeパッケージはもう使わない
 )
 
 // PushDeviceRequest は /pubsub/push/device エンドポイントのリクエストボディ構造体です。
@@ -21,14 +18,12 @@ type PushDeviceRequest struct {
 // PushDeviceHandler は特定の単一デバイストークンへのPush通知を処理します。
 type PushDeviceHandler struct {
 	fcmClient *fcmHandlerClient
-	// deviceStore *store.DeviceStore // 削除
 }
 
 // NewPushDeviceHandler は新しいPushDeviceHandlerのインスタンスを作成します。
-func NewPushDeviceHandler(fc *fcmHandlerClient /* ds *store.DeviceStore // 削除 */) *PushDeviceHandler {
+func NewPushDeviceHandler(fc *fcmHandlerClient) *PushDeviceHandler {
 	return &PushDeviceHandler{
 		fcmClient: fc,
-		// deviceStore: ds, // 削除
 	}
 }
 

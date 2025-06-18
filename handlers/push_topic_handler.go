@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-
-	"github.com/teamzidi/example-go-fcm/fcm"
-	// "github.com/teamzidi/example-go-fcm/store" // storeパッケージはもう使わない
 )
 
 // PushTopicRequest は /push/topic エンドポイントのリクエストボディ構造体です。
@@ -21,14 +18,12 @@ type PushTopicRequest struct {
 // PushTopicHandler は特定のFCMトピックへのPush通知を処理します。
 type PushTopicHandler struct {
 	fcmClient *fcmHandlerClient
-	// deviceStore *store.DeviceStore // 削除
 }
 
 // NewPushTopicHandler は新しいPushTopicHandlerのインスタンスを作成します。
-func NewPushTopicHandler(fc *fcmHandlerClient /* ds *store.DeviceStore // 削除 */) *PushTopicHandler {
+func NewPushTopicHandler(fc *fcmHandlerClient) *PushTopicHandler {
 	return &PushTopicHandler{
 		fcmClient: fc,
-		// deviceStore: ds, // 削除
 	}
 }
 
@@ -76,8 +71,8 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "processed",
+		"status":     "processed",
 		"message_id": messageID,
-		"topic":     req.Topic,
+		"topic":      req.Topic,
 	})
 }
