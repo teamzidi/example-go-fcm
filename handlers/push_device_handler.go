@@ -7,29 +7,28 @@ import (
 	"net/http"
 
 	"github.com/teamzidi/example-go-fcm/fcm"
-	"github.com/teamzidi/example-go-fcm/store"
+	// "github.com/teamzidi/example-go-fcm/store" // storeパッケージはもう使わない
 )
 
 // PushDeviceRequest は /pubsub/push/device エンドポイントのリクエストボディ構造体です。
-// トークンは単一の文字列として受け取ります。
 type PushDeviceRequest struct {
 	Title      string            `json:"title"`
 	Body       string            `json:"body"`
-	Token      string            `json:"token"` // 単一トークンに変更
+	Token      string            `json:"token"`
 	CustomData map[string]string `json:"custom_data,omitempty"`
 }
 
 // PushDeviceHandler は特定の単一デバイストークンへのPush通知を処理します。
 type PushDeviceHandler struct {
-	fcmClient   *fcmHandlerClient
-	deviceStore *store.DeviceStore
+	fcmClient *fcmHandlerClient
+	// deviceStore *store.DeviceStore // 削除
 }
 
 // NewPushDeviceHandler は新しいPushDeviceHandlerのインスタンスを作成します。
-func NewPushDeviceHandler(fc *fcmHandlerClient, ds *store.DeviceStore) *PushDeviceHandler {
+func NewPushDeviceHandler(fc *fcmHandlerClient /* ds *store.DeviceStore // 削除 */) *PushDeviceHandler {
 	return &PushDeviceHandler{
-		fcmClient:   fc,
-		deviceStore: ds,
+		fcmClient: fc,
+		// deviceStore: ds, // 削除
 	}
 }
 
@@ -48,7 +47,6 @@ func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// バリデーション
 	if req.Title == "" {
 		log.Println("PushDeviceHandler: Title is required")
 		http.Error(w, "Title is required", http.StatusBadRequest)
@@ -59,7 +57,7 @@ func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Body is required", http.StatusBadRequest)
 		return
 	}
-	if req.Token == "" { // 単一トークンの空チェック
+	if req.Token == "" {
 		log.Println("PushDeviceHandler: Token is required")
 		http.Error(w, "Token is required", http.StatusBadRequest)
 		return

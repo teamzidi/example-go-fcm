@@ -12,7 +12,6 @@ import (
 	"reflect"
 
 	// "github.com/teamzidi/example-go-fcm/fcm" // fcm パッケージは直接インポートしない
-	"github.com/teamzidi/example-go-fcm/store"
 	// firebase messaging はモックのシグネチャで直接は使わない
 	// "firebase.google.com/go/v4/messaging"
 )
@@ -88,7 +87,6 @@ func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			deviceStore := store.NewDeviceStore()
 			// handlers パッケージ内の newFcmHandlerClient を呼び出す (ビルドタグで実体が切り替わる)
 			mockFCMClient, err := newFcmHandlerClient(context.Background())
 			if err != nil {
@@ -101,7 +99,7 @@ func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
 			}
 
 			// NewPushDeviceHandler は *fcmHandlerClient を受け取るように修正済みのはず
-			handler := NewPushDeviceHandler(mockFCMClient, deviceStore)
+			handler := NewPushDeviceHandler(mockFCMClient)
 
 			reqBodyBytes, _ := json.Marshal(tt.requestBody)
 			req := httptest.NewRequest(http.MethodPost, "/pubsub/push/device", bytes.NewBuffer(reqBodyBytes))
@@ -119,9 +117,8 @@ func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
 }
 
 func TestPushDeviceHandler_ServeHTTP_InvalidMethod(t *testing.T) {
-	deviceStore := store.NewDeviceStore()
 	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
-	handler := NewPushDeviceHandler(mockFCMClient, deviceStore)
+	handler := NewPushDeviceHandler(mockFCMClient)
 	req := httptest.NewRequest(http.MethodGet, "/pubsub/push/device", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -131,9 +128,8 @@ func TestPushDeviceHandler_ServeHTTP_InvalidMethod(t *testing.T) {
 }
 
 func TestPushDeviceHandler_ServeHTTP_InvalidJSON(t *testing.T) {
-	deviceStore := store.NewDeviceStore()
 	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
-	handler := NewPushDeviceHandler(mockFCMClient, deviceStore)
+	handler := NewPushDeviceHandler(mockFCMClient)
 	req := httptest.NewRequest(http.MethodPost, "/pubsub/push/device", strings.NewReader("this is not json"))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

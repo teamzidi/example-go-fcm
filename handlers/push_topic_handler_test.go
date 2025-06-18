@@ -12,7 +12,6 @@ import (
 	"reflect"
 
 	// "github.com/teamzidi/example-go-fcm/fcm" // fcm パッケージは直接インポートしない
-	"github.com/teamzidi/example-go-fcm/store"
 	// "firebase.google.com/go/v4/messaging" // messaging.Message はモックの引数型としては不要になった
 )
 
@@ -88,7 +87,6 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			deviceStore := store.NewDeviceStore()
 			// handlers パッケージ内の newFcmHandlerClient を呼び出す (ビルドタグで実体が切り替わる)
 			mockFCMClient, err := newFcmHandlerClient(context.Background())
 			if err != nil {
@@ -101,7 +99,7 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 			}
 
 			// NewPushTopicHandler は *fcmHandlerClient を受け取るように修正済みのはず
-			handler := NewPushTopicHandler(mockFCMClient, deviceStore)
+			handler := NewPushTopicHandler(mockFCMClient)
 
 			reqBodyBytes, _ := json.Marshal(tt.requestBody)
 			req := httptest.NewRequest(http.MethodPost, "/pubsub/push/topic", bytes.NewBuffer(reqBodyBytes))
@@ -119,9 +117,8 @@ func TestPushTopicHandler_ServeHTTP(t *testing.T) {
 }
 
 func TestPushTopicHandler_ServeHTTP_InvalidMethod(t *testing.T) {
-	deviceStore := store.NewDeviceStore()
 	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
-	handler := NewPushTopicHandler(mockFCMClient, deviceStore)
+	handler := NewPushTopicHandler(mockFCMClient)
 	req := httptest.NewRequest(http.MethodGet, "/pubsub/push/topic", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
@@ -131,9 +128,8 @@ func TestPushTopicHandler_ServeHTTP_InvalidMethod(t *testing.T) {
 }
 
 func TestPushTopicHandler_ServeHTTP_InvalidJSON(t *testing.T) {
-	deviceStore := store.NewDeviceStore()
 	mockFCMClient, _ := newFcmHandlerClient(context.Background()) // ここも変更
-	handler := NewPushTopicHandler(mockFCMClient, deviceStore)
+	handler := NewPushTopicHandler(mockFCMClient)
 	req := httptest.NewRequest(http.MethodPost, "/pubsub/push/topic", strings.NewReader("this is not json"))
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)

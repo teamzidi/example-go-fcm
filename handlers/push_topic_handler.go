@@ -6,9 +6,8 @@ import (
 	"log"
 	"net/http"
 
-	// "firebase.google.com/go/v4/messaging" // FCMClientのメソッド呼び出しに変わったため不要
 	"github.com/teamzidi/example-go-fcm/fcm"
-	"github.com/teamzidi/example-go-fcm/store"
+	// "github.com/teamzidi/example-go-fcm/store" // storeパッケージはもう使わない
 )
 
 // PushTopicRequest は /push/topic エンドポイントのリクエストボディ構造体です。
@@ -21,15 +20,15 @@ type PushTopicRequest struct {
 
 // PushTopicHandler は特定のFCMトピックへのPush通知を処理します。
 type PushTopicHandler struct {
-	fcmClient   *fcmHandlerClient // インターフェースではなく具象型
-	deviceStore *store.DeviceStore
+	fcmClient *fcmHandlerClient
+	// deviceStore *store.DeviceStore // 削除
 }
 
 // NewPushTopicHandler は新しいPushTopicHandlerのインスタンスを作成します。
-func NewPushTopicHandler(fc *fcmHandlerClient, ds *store.DeviceStore) *PushTopicHandler {
+func NewPushTopicHandler(fc *fcmHandlerClient /* ds *store.DeviceStore // 削除 */) *PushTopicHandler {
 	return &PushTopicHandler{
-		fcmClient:   fc,
-		deviceStore: ds,
+		fcmClient: fc,
+		// deviceStore: ds, // 削除
 	}
 }
 
@@ -66,7 +65,7 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("PushTopicHandler: Sending notification to topic '%s'. Title: '%s', Data: %v\n", req.Topic, req.Title, req.CustomData)
 
-	messageID, err := h.fcmClient.SendToTopic(context.Background(), req.Topic, req.Title, req.Body, req.CustomData) // customData を渡す
+	messageID, err := h.fcmClient.SendToTopic(context.Background(), req.Topic, req.Title, req.Body, req.CustomData)
 	if err != nil {
 		log.Printf("PushTopicHandler: Error sending FCM message to topic %s: %v. Returning 503.\n", req.Topic, err)
 		http.Error(w, "Failed to send notification to topic via FCM", http.StatusServiceUnavailable)

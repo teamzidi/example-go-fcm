@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/teamzidi/example-go-fcm/handlers"
-	"github.com/teamzidi/example-go-fcm/store"
 	// "github.com/teamzidi/example-go-fcm/pubsub" // ← 不要になるのでコメントアウトまたは削除
 )
 
@@ -36,8 +35,6 @@ func main() {
 	// }
 
 	// デバイストークンストアの初期化
-	deviceStore := store.NewDeviceStore()
-	log.Println("Device store initialized.")
 
 	// FCMクライアントの初期化
 	fcmClient, err := handlers.newFcmHandlerClient(ctx)
@@ -65,13 +62,11 @@ func main() {
 	// HTTPルーターの設定
 	mux := http.NewServeMux()
 	// デバイストークン登録APIハンドラ (既存)
-	registrationHandler := handlers.NewRegistrationHandler(deviceStore)
-	mux.Handle("/register", registrationHandler)
 	// Pub/Sub Push受信用ハンドラ (デバイス指定)
-	pushDeviceHandler := handlers.NewPushDeviceHandler(fcmClient, deviceStore)
+	pushDeviceHandler := handlers.NewPushDeviceHandler(fcmClient)
 	mux.Handle("/pubsub/push/device", pushDeviceHandler)
 	// Pub/Sub Push受信用ハンドラ (トピック指定)
-	pushTopicHandler := handlers.NewPushTopicHandler(fcmClient, deviceStore)
+	pushTopicHandler := handlers.NewPushTopicHandler(fcmClient)
 	mux.Handle("/pubsub/push/topic", pushTopicHandler)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

@@ -5,7 +5,6 @@ Cloud Runでの動作を想定しています。
 
 ## 機能
 
-- デバイス登録API: クライアント（モバイルアプリなど）からデバイストークンを受け取り保存します。
 - Pub/Sub連携 (Push型): Google Cloud Pub/Sub からのPush通知を受け取り、以下のいずれかの方法でプッシュ通知を送信します。
     - 指定された単一のデバイストークンへ送信。
     - 指定されたFCMトピックへ送信。
@@ -14,45 +13,17 @@ Cloud Runでの動作を想定しています。
 
 - `main.go`: アプリケーションのエントリーポイント。HTTPサーバー、ルーティングなど。
 - `handlers/`: HTTPリクエストハンドラ。
-  - `registration.go`: デバイストークン登録処理。
   - `push_device_handler.go`: 指定デバイストークンへのPub/Sub Push通知受信・処理。
   - `push_topic_handler.go`: 指定FCMトピックへのPub/Sub Push通知受信・処理。
   - `fcm_client_config.go`: 本番用FCMクライアント設定 (`//go:build !test_fcm_mock`)。`fcm.Client` への型エイリアスとファクトリ関数を定義。
   - `fcm_client_config_mock.go`: テスト用モックFCMクライアント設定 (`//go:build test_fcm_mock`)。モック版`fcmHandlerClient`とそのファクトリ関数を定義。
 - `fcm/`: FCM関連処理。
   - `fcm_client.go`: FCMクライアントの本番実装（`Client`構造体、`NewClient`、`SendToToken`、`SendToTopic`メソッド）。
-- `store/`: デバイストークンストレージ。
-  - `devicestore.go`: インメモリでのデバイストークン管理。
 - `Dockerfile`: アプリケーションのコンテナイメージをビルドするためのファイル。
 - `fcm_topic.md`: FCMトピックメッセージング機能に関する詳細説明。
 - `*_test.go`: 各パッケージのユニットテストファイル。
 
 ## APIエンドポイント
-
-### デバイストークン登録
-
-- `POST /register`: デバイストークンを登録します。
-  - リクエストボディ (JSON):
-    ```json
-    {
-      "token": "YOUR_DEVICE_TOKEN"
-    }
-    ```
-  - レスポンス:
-    - 成功 (新規登録) (201 Created):
-      ```json
-      {
-        "message": "Device token registered successfully"
-      }
-      ```
-    - 成功 (既に登録済み) (409 Conflict):
-      ```json
-      {
-        "message": "Device token already exists"
-      }
-      ```
-    - エラー (バリデーションエラー: トークンが空、長すぎる(最大4096文字)等) (400 Bad Request):
-      プレーンテキストでエラーメッセージ。
 
 ### Pub/Sub Push通知受信用エンドポイント
 
@@ -67,10 +38,7 @@ Cloud Runでの動作を想定しています。
       "token": "your_single_device_token", // 送信対象のデバイストークン (必須、文字列)
       "custom_data": { // オプショナル: アプリ固有の追加データ。FCMメッセージのデータペイロードとして送信されます。
         "key1": "value1"
-      }
-    }
     ```
-  - レスポンス:
     - 成功 (200 OK): FCMへの送信処理結果（メッセージID、トークン）を含むJSON。
     - エラー (必須フィールド欠如など) (400 Bad Request): エラーメッセージ。
     - エラー (FCM送信失敗時) (503 Service Unavailable): Pub/Subに再試行を促します。
@@ -84,10 +52,7 @@ Cloud Runでの動作を想定しています。
       "topic": "your_target_topic_name", // 送信対象のFCMトピック名 (必須)
       "custom_data": { // オプショナル: アプリ固有の追加データ。FCMメッセージのデータペイロードとして送信されます。
         "key1": "value1"
-      }
-    }
     ```
-  - レスポンス:
     - 成功 (200 OK): FCMへの送信結果（メッセージID、トピック名）を含むJSON。
     - エラー (必須フィールド欠如など) (400 Bad Request): エラーメッセージ。
     - エラー (FCM送信失敗時) (503 Service Unavailable): Pub/Subに再試行を促します。
@@ -217,13 +182,12 @@ docker build -t your-image-name .
    Pub/SubからのPush認証は、上記の「Pushサブスクリプションの作成例」で設定したPub/Subサービスアカウント (`service-${PROJECT_NUMBER}@gcp-sa-pubsub.iam.gserviceaccount.com`) とCloud RunサービスのIAM設定 (`roles/run.invoker`) によって行われます。
 
 ## デバイストークンのバリデーション
-(変更なし)
+
 登録されるデバイストークンには以下の簡易的なバリデーションが適用されます。
 - 空白文字のみでないこと。
 - 最大長: 4096文字。
 
 ## 注意事項
-(変更なし)
-- **デバイストークンの永続化**: このサンプルではデバイストークンはインメモリに保存されます。アプリケーションが再起動するとトークンは失われます。本番環境ではFirestoreやCloud SQLなどの永続ストレージに保存することを検討してください。
+- **デバイストークンの扱い**: このアプリケーションはデバイストークンをサーバー側に保存・キャッシュしません。通知の送信対象（トークンまたはトピック）は、Pub/Subメッセージで都度指定される必要があります。
 - **エラーハンドリング**: Pub/Subメッセージの処理失敗時のリトライ戦略（Pushサブスクリプションの再試行ポリシーやデッドレター設定）や、FCMへの送信失敗時の詳細なエラーハンドリングは、要件に応じて強化が必要です。
-- **セキュリティ**: `/register` エンドポイントは現在認証なしでアクセス可能です。必要に応じて認証機構（APIキー、OAuthなど）を導入してください。各 `/pubsub/push/*` エンドポイントはIAMによって保護されています。
+- **セキュリティ**: 各 `/pubsub/push/*` エンドポイントはIAMによって保護されています。
