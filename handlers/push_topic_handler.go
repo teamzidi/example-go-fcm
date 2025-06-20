@@ -90,15 +90,15 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("PushTopicHandler: Successfully sent message ID %s to topic %s\n", messageID, payload.Topic)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":     "processed",
 		"message_id": messageID,
 	}); err != nil {
 		log.Printf("PushTopicHandler: Error encoding response: %v\n", err)
 	}
-
-	log.Printf("PushTopicHandler: Successfully sent message ID %s to topic %s\n", messageID, payload.Topic)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 }

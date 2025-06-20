@@ -23,11 +23,6 @@ func main() {
 		port = "8080"
 	}
 
-	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-	if projectID == "" {
-		log.Println("WARNING: GOOGLE_CLOUD_PROJECT environment variable not set. This might be an issue for FCM client initialization if not running on Cloud Run.")
-	}
-
 	// FCMクライアントの初期化
 	fcmClient, err := fcm.NewClient(ctx)
 	if err != nil {

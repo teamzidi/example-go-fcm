@@ -90,15 +90,15 @@ func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("PushDeviceHandler: Successfully sent message ID %s to token %s\n", messageID, payload.Token)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":     "processed",
 		"message_id": messageID,
 	}); err != nil {
 		log.Printf("PushDeviceHandler: Error encoding response: %v\n", err)
 	}
-
-	log.Printf("PushDeviceHandler: Successfully sent message ID %s to token %s\n", messageID, payload.Token)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 }
