@@ -3,10 +3,16 @@ package fcm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
+)
+
+var (
+	ErrInvalidArgument = errors.New("invalid argument")
+	ErrFCMServiceError = errors.New("FCM service error")
 )
 
 // Client はFirebase Cloud Messagingのクライアントです。(旧 FCMClient)
@@ -34,7 +40,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 func (c *Client) SendToToken(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error) {
 	if token == "" {
 		log.Println("Client: Token is empty in SendToToken.")
-		return "", errors.New("FCM token cannot be empty")
+		return "", fmt.Errorf("%w: token cannot be empty", ErrInvalidArgument)
 	}
 	message := &messaging.Message{
 		Notification: &messaging.Notification{
@@ -48,8 +54,9 @@ func (c *Client) SendToToken(ctx context.Context, token string, title string, bo
 	response, err := c.msg.Send(ctx, message)
 	if err != nil {
 		log.Printf("Client: Error sending message to token %s: %v\n", token, err)
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrFCMServiceError, err)
 	}
+
 	log.Printf("Client: Successfully sent message to token %s: %s\n", token, response)
 	return response, nil
 }
@@ -58,7 +65,7 @@ func (c *Client) SendToToken(ctx context.Context, token string, title string, bo
 func (c *Client) SendToTopic(ctx context.Context, topic string, title string, body string, customData map[string]string) (string, error) {
 	if topic == "" {
 		log.Println("Client: Topic is empty in SendToTopic.")
-		return "", errors.New("FCM topic cannot be empty")
+		return "", fmt.Errorf("%w: topic cannot be empty", ErrInvalidArgument)
 	}
 	message := &messaging.Message{
 		Notification: &messaging.Notification{
@@ -72,7 +79,7 @@ func (c *Client) SendToTopic(ctx context.Context, topic string, title string, bo
 	response, err := c.msg.Send(ctx, message)
 	if err != nil {
 		log.Printf("Client: Error sending message to topic %s: %v\n", topic, err)
-		return "", err
+		return "", fmt.Errorf("%w: %v", ErrFCMServiceError, err)
 	}
 	log.Printf("Client: Successfully sent message to topic %s: %s\n", topic, response)
 	return response, nil

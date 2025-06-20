@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/teamzidi/example-go-fcm/fcm"
 	"github.com/teamzidi/example-go-fcm/handlers"
-	// "github.com/teamzidi/example-go-fcm/pubsub" // ← 不要になるのでコメントアウトまたは削除
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	// 環境変数から設定を読み込む
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // デフォルトポート
+		port = "8080"
 	}
 
 	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
@@ -28,46 +28,23 @@ func main() {
 		log.Println("WARNING: GOOGLE_CLOUD_PROJECT environment variable not set. This might be an issue for FCM client initialization if not running on Cloud Run.")
 	}
 
-	// Pullサブスクライバ用の環境変数はアプリケーションロジックからは不要になる
-	// pubsubSubscriptionID := os.Getenv("PUBSUB_SUBSCRIPTION_ID")
-	// if pubsubSubscriptionID == "" {
-	// 	log.Fatal("PUBSUB_SUBSCRIPTION_ID environment variable is required.")
-	// }
-
-	// デバイストークンストアの初期化
-
 	// FCMクライアントの初期化
-	fcmClient, err := handlers.NewFcmHandlerClient(ctx)
+	fcmClient, err := fcm.NewClient(ctx)
 	if err != nil {
 		log.Fatalf("Failed to initialize FCM client: %v", err)
 	}
 	log.Println("FCM client initialized.")
 
-	// Pub/Sub Pushハンドラの初期化
-
-	// Pullサブスクライバの初期化と起動処理は削除
-	// subscriber, err := pubsub.NewSubscriber(ctx, projectID, pubsubSubscriptionID, fcmClient, deviceStore)
-	// if err != nil {
-	// 	log.Fatalf("Failed to initialize Pub/Sub subscriber: %v", err)
-	// }
-	// if subscriber == nil {
-	// 	log.Printf("Pub/Sub subscriber was not fully initialized...")
-	// } else {
-	// 	go subscriber.StartReceiving(ctx)
-	// 	log.Printf("Pub/Sub subscriber started for subscription %s.", pubsubSubscriptionID)
-	// 	defer subscriber.Close()
-	// }
-
-
 	// HTTPルーターの設定
 	mux := http.NewServeMux()
-	// デバイストークン登録APIハンドラ (既存)
+
 	// Pub/Sub Push受信用ハンドラ (デバイス指定)
 	pushDeviceHandler := handlers.NewPushDeviceHandler(fcmClient)
-	mux.Handle("/pubsub/push/device", pushDeviceHandler)
+	mux.Handle("/publish/token", pushDeviceHandler)
+
 	// Pub/Sub Push受信用ハンドラ (トピック指定)
 	pushTopicHandler := handlers.NewPushTopicHandler(fcmClient)
-	mux.Handle("/pubsub/push/topic", pushTopicHandler)
+	mux.Handle("/publish/topic", pushTopicHandler)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

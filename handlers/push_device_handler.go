@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/teamzidi/example-go-fcm/fcm"
 )
 
 // DevicePushPayload は /pubsub/push/device エンドポイントでPub/Subメッセージの
@@ -19,18 +21,16 @@ type DevicePushPayload struct {
 
 // PushDeviceHandler は特定の単一デバイストークンへのPush通知を処理します。
 type PushDeviceHandler struct {
-	fcmClient *fcmHandlerClient
+	fcmClient fcmClient
 }
 
-// NewPushDeviceHandler は新しいPushDeviceHandlerのインスタンスを作成します。
-func NewPushDeviceHandler(fc *fcmHandlerClient) *PushDeviceHandler {
+func NewPushDeviceHandler(fc *fcm.Client) *PushDeviceHandler {
 	return &PushDeviceHandler{
 		fcmClient: fc,
 	}
 }
 
 // ServeHTTP はHTTPリクエストを処理します。
-// Pub/SubからのPushリクエストを想定しています。
 func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		log.Printf("PushDeviceHandler: Invalid request method: %s\n", r.Method)
@@ -38,12 +38,10 @@ func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Pub/Sub Pushリクエストのエンベロープをデコード
-	var pubSubReq PubSubPushRequest // common_push_types.go で定義
+	var pubSubReq PubSubPushRequest
 	if err := json.NewDecoder(r.Body).Decode(&pubSubReq); err != nil {
 		log.Printf("PushDeviceHandler: Error decoding Pub/Sub envelope: %v\n", err)
-		http.Error(w, "Invalid Pub/Sub message format", http.StatusBadRequest)
-		return
+		return // bye
 	}
 
 	log.Printf("PushDeviceHandler: Received Pub/Sub message ID %s from subscription %s published at %s\n",
@@ -51,63 +49,56 @@ func (h *PushDeviceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if pubSubReq.Message.Data == "" {
 		log.Println("PushDeviceHandler: Pub/Sub message data is empty. Acking.")
-		// 何も処理せず200 OKを返すことでメッセージがAckされる
-		w.Header().Set("Content-Type", "application/json") // レスポンスタイプを設定
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "acknowledged", "reason": "empty Pub/Sub message data"})
-		return
+		return // bye
 	}
 
-	// 2. Message.Data (Base64エンコードされた文字列) をデコード
 	decodedData, err := base64.StdEncoding.DecodeString(pubSubReq.Message.Data)
 	if err != nil {
 		log.Printf("PushDeviceHandler: Error decoding base64 data: %v\n", err)
-		http.Error(w, "Invalid base64 data in Pub/Sub message", http.StatusBadRequest)
-		return
+		return // bye
 	}
 
-	// 3. デコードされたJSONを実際の業務ペイロード (DevicePushPayload) にアンマーシャル
-	var actualPayload DevicePushPayload
-	if err := json.Unmarshal(decodedData, &actualPayload); err != nil {
+	var payload DevicePushPayload
+	if err := json.Unmarshal(decodedData, &payload); err != nil {
 		log.Printf("PushDeviceHandler: Error unmarshalling actual payload: %v. Decoded data was: %s\n", err, string(decodedData))
-		http.Error(w, "Invalid actual payload format in Pub/Sub message data", http.StatusBadRequest)
-		return
+		return // bye
 	}
 
-	// 4. 業務ペイロードのバリデーション
-	if actualPayload.Title == "" {
-		log.Println("PushDeviceHandler: Title is required in actual payload")
-		http.Error(w, "Title is required in actual payload", http.StatusBadRequest)
-		return
+	if payload.Title == "" {
+		log.Println("PushDeviceHandler: Title is required in payload")
+		return // bye
 	}
-	if actualPayload.Body == "" {
-		log.Println("PushDeviceHandler: Body is required in actual payload")
-		http.Error(w, "Body is required in actual payload", http.StatusBadRequest)
-		return
+
+	if payload.Body == "" {
+		log.Println("PushDeviceHandler: Body is required in payload")
+		return // bye
 	}
-	if actualPayload.Token == "" {
-		log.Println("PushDeviceHandler: Token is required in actual payload")
-		http.Error(w, "Token is required in actual payload", http.StatusBadRequest)
-		return
+
+	if payload.Token == "" {
+		log.Println("PushDeviceHandler: Token is required in payload")
+		return // bye
 	}
 
 	log.Printf("PushDeviceHandler: Sending notification to device token '%s'. Title: '%s', Data: %v\n",
-		actualPayload.Token, actualPayload.Title, actualPayload.CustomData)
+		payload.Token, payload.Title, payload.CustomData)
 
-	// 5. FCM送信
-	messageID, err := h.fcmClient.SendToToken(context.Background(), actualPayload.Token, actualPayload.Title, actualPayload.Body, actualPayload.CustomData)
+	// FCM送信
+	messageID, err := h.fcmClient.SendToToken(context.Background(), payload.Token, payload.Title, payload.Body, payload.CustomData)
 	if err != nil {
-		log.Printf("PushDeviceHandler: Error sending FCM message to token %s: %v. Returning 503.\n", actualPayload.Token, err)
+		log.Printf("PushDeviceHandler: Error sending FCM message to token %s: %v. Returning 503.\n", payload.Token, err)
 		http.Error(w, "Failed to send notification via FCM", http.StatusServiceUnavailable)
 		return
 	}
 
-	log.Printf("PushDeviceHandler: Successfully sent message ID %s to token %s\n", messageID, actualPayload.Token)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":     "processed",
 		"message_id": messageID,
-		"token":      actualPayload.Token,
-	})
+	}); err != nil {
+		log.Printf("PushDeviceHandler: Error encoding response: %v\n", err)
+	}
+
+	log.Printf("PushDeviceHandler: Successfully sent message ID %s to token %s\n", messageID, payload.Token)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 }
