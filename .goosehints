@@ -1,3 +1,5 @@
+---
+DefaultBranch: master
 Language: Go
 ProjectPhase: Development
-Notes:
+---

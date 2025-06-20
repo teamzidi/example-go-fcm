@@ -1,0 +1,75 @@
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/teamzidi/example-go-fcm/fcm"
+	"github.com/teamzidi/example-go-fcm/handlers"
+)
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 環境変数から設定を読み込む
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	// FCMクライアントの初期化
+	fcmClient, err := fcm.NewClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to initialize FCM client: %v", err)
+	}
+	log.Println("FCM client initialized.")
+
+	// HTTPルーターの設定
+	mux := http.NewServeMux()
+
+	// Pub/Sub Push受信用ハンドラ (デバイス指定)
+	pushDeviceHandler := handlers.NewPushDeviceHandler(fcmClient)
+	mux.Handle("/publish/token", pushDeviceHandler)
+
+	// Pub/Sub Push受信用ハンドラ (トピック指定)
+	pushTopicHandler := handlers.NewPushTopicHandler(fcmClient)
+	mux.Handle("/publish/topic", pushTopicHandler)
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	log.Printf("Starting server on port %s\n", port)
+
+	server := &http.Server{
+		Addr:    ":" + port,
+		Handler: mux,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("ListenAndServe: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exiting")
+}
