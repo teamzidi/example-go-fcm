@@ -4,16 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
 )
 
-var (
-	ErrInvalidArgument = errors.New("invalid argument")
-	ErrFCMServiceError = errors.New("FCM service error")
-)
+func IsRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return messaging.IsInternal(err) || messaging.IsUnavailable(err) || messaging.IsQuotaExceeded(err)
+}
 
 // Client はFirebase Cloud Messagingのクライアントです。(旧 FCMClient)
 type Client struct {
@@ -25,23 +27,23 @@ type Client struct {
 func NewClient(ctx context.Context) (*Client, error) {
 	app, err := firebase.NewApp(ctx, nil)
 	if err != nil {
-		log.Printf("Error initializing Firebase app: %v\n", err)
 		return nil, err
 	}
+
 	msgClient, err := app.Messaging(ctx)
 	if err != nil {
-		log.Printf("Error getting Messaging client: %v\n", err)
 		return nil, err
 	}
+
 	return &Client{msg: msgClient}, nil
 }
 
 // SendToToken は指定された単一のデバイストークンに通知とデータペイロードを送信します。
 func (c *Client) SendToToken(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error) {
 	if token == "" {
-		log.Println("Client: Token is empty in SendToToken.")
-		return "", fmt.Errorf("%w: token cannot be empty", ErrInvalidArgument)
+		return "", errors.New("token cannot be empty")
 	}
+
 	message := &messaging.Message{
 		Notification: &messaging.Notification{
 			Title: title,
@@ -53,20 +55,18 @@ func (c *Client) SendToToken(ctx context.Context, token string, title string, bo
 
 	response, err := c.msg.Send(ctx, message)
 	if err != nil {
-		log.Printf("Client: Error sending message to token %s: %v\n", token, err)
-		return "", fmt.Errorf("%w: %v", ErrFCMServiceError, err)
+		return "", fmt.Errorf("sending message to token %s: %w", token, err)
 	}
 
-	log.Printf("Client: Successfully sent message to token %s: %s\n", token, response)
 	return response, nil
 }
 
 // SendToTopic は指定されたFCMトピックに通知とデータペイロードを送信します。
 func (c *Client) SendToTopic(ctx context.Context, topic string, title string, body string, customData map[string]string) (string, error) {
 	if topic == "" {
-		log.Println("Client: Topic is empty in SendToTopic.")
-		return "", fmt.Errorf("%w: topic cannot be empty", ErrInvalidArgument)
+		return "", fmt.Errorf("topic cannot be empty")
 	}
+
 	message := &messaging.Message{
 		Notification: &messaging.Notification{
 			Title: title,
@@ -78,9 +78,8 @@ func (c *Client) SendToTopic(ctx context.Context, topic string, title string, bo
 
 	response, err := c.msg.Send(ctx, message)
 	if err != nil {
-		log.Printf("Client: Error sending message to topic %s: %v\n", topic, err)
-		return "", fmt.Errorf("%w: %v", ErrFCMServiceError, err)
+		return "", fmt.Errorf("sending message to topic %s: %w", topic, err)
 	}
-	log.Printf("Client: Successfully sent message to topic %s: %s\n", topic, response)
+
 	return response, nil
 }
