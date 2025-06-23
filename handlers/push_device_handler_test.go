@@ -3,124 +3,147 @@ package handlers_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64" // Base64エンコードのためにインポート
-	"encoding/json"
+	"encoding/base64" // Re-add for specific test case
+	// "encoding/json"  // No longer needed directly here
+	// "errors"         // No longer needed directly here
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	// Import fcm for fcm.IsRetryableError (though not directly used in mock setup here, handler uses it)
+	_ "github.com/teamzidi/example-go-fcm/fcm"
+	// Import handlers to use handlers.MockFCMClient and target handlers like PushDeviceHandler
+	"github.com/teamzidi/example-go-fcm/handlers"
+	// Dot import for handlers types like DevicePushPayload, etc. was used.
+	// This is okay for test files if it's the prevailing style.
+	// However, specific types like handlers.DevicePushPayload can also be used.
+	// For this modification, I'll keep the dot import if the original test used it extensively
+	// for types like DevicePushPayload. The `.` import for handlers was in the original file.
 	. "github.com/teamzidi/example-go-fcm/handlers"
 )
 
-// Helper function to create a PubSubPushRequest for device push tests
-func newPushPubSubRequest(payload any) []byte {
-	payloadBytes, _ := json.Marshal(payload)
-	req := PubSubPushRequest{
-		Message: PubSubInternalMessage{
-			Data:        base64.StdEncoding.EncodeToString(payloadBytes),
-			MessageID:   "test-message-id",
-			PublishTime: "test-publish-time",
-		},
-		Subscription: "test-subscription",
-	}
+// MockFCMClient definition is removed from here. It's now in handlers/mock_test.go (package handlers)
+// Sentinel errors (errFCMRetryable, errFCMNonRetryable) are removed. They are in test_helpers_test.go (package handlers_test)
+// Helper functions (newPushPubSubRequest, newPushPubSubRequestRawData) are removed. They are in test_helpers_test.go (package handlers_test)
 
-	bytes, err := json.Marshal(&req)
-	if err != nil {
-		panic("Failed to marshal PubSubPushRequest: " + err.Error())
-	}
-
-	return bytes
-}
-
-func TestPushDeviceHandler_ServeHTTP(t *testing.T) {
+func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 	tests := []struct {
 		name           string
+		method         string
 		body           []byte
-		mockFunc       func(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error)
+		mockSendFunc   func(ctx context.Context, token string, title string, body string, customData map[string]string) (string, error)
 		expectedStatus int
 	}{
 		{
-			name: "success",
-			body: newPushPubSubRequest(DevicePushPayload{
-				Title: "Device Test Title",
-				Body:  "Device Test Body",
-				Token: "dev_token1",
-			}),
-			mockFunc:       nil,
+			name:   "successful FCM send",
+			method: http.MethodPost,
+			// Uses newPushPubSubRequest from test_helpers_test.go
+			// Needs DevicePushPayload from "github.com/teamzidi/example-go-fcm/handlers"
+			body: newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token"}),
+			mockSendFunc: func(ctx context.Context, token, title, body string, customData map[string]string) (string, error) {
+				return "fcm-success-id", nil
+			},
 			expectedStatus: http.StatusOK,
 		},
 		{
-			name: "missing token",
-			body: newPushPubSubRequest(DevicePushPayload{
-				Title: "Device Error Title",
-				Body:  "Device Error Body",
-			}),
-			mockFunc:       nil,
-			expectedStatus: http.StatusOK,
+			name:   "retryable FCM error",
+			method: http.MethodPost,
+			body:   newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token-retry"}),
+			mockSendFunc: func(ctx context.Context, token, title, body string, customData map[string]string) (string, error) {
+				return "", errFCMRetryable // errFCMRetryable from test_helpers_test.go
+			},
+			expectedStatus: http.StatusInternalServerError,
 		},
 		{
-			name: "missing title",
-			body: newPushPubSubRequest(DevicePushPayload{
-				Body:  "Body",
-				Token: "token",
-			}),
-			mockFunc:       nil,
-			expectedStatus: http.StatusOK,
+			name:   "non-retryable FCM error",
+			method: http.MethodPost,
+			body:   newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token-nonretry"}),
+			mockSendFunc: func(ctx context.Context, token, title, body string, customData map[string]string) (string, error) {
+				return "", errFCMNonRetryable // errFCMNonRetryable from test_helpers_test.go
+			},
+			expectedStatus: http.StatusNoContent,
 		},
 		{
-			name: "missing body",
-			body: newPushPubSubRequest(DevicePushPayload{
-				Title: "Device Test Title",
-				Token: "dev_token1",
-			}),
-			mockFunc:       nil,
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name:           "empty request body",
+			name:           "invalid HTTP method",
+			method:         http.MethodGet,
 			body:           nil,
-			mockFunc:       nil,
-			expectedStatus: http.StatusOK,
+			expectedStatus: http.StatusMethodNotAllowed, // Updated expected status
 		},
 		{
-			name:           "empty data",
-			body:           newPushPubSubRequest(nil),
-			mockFunc:       nil,
-			expectedStatus: http.StatusOK,
+			name:           "Pub/Sub envelope decoding error (malformed JSON)",
+			method:         http.MethodPost,
+			body:           []byte("this is not json"),
+			expectedStatus: http.StatusNoContent,
 		},
 		{
-			name:           "invalid request body",
-			body:           []byte("hello, world!"),
-			mockFunc:       nil,
-			expectedStatus: http.StatusOK,
+			name:           "empty Pub/Sub message data (Data field is empty string)",
+			method:         http.MethodPost,
+			body:           newPushPubSubRequestRawData(""), // Uses newPushPubSubRequestRawData from test_helpers_test.go
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "base64 decoding error for message data (Data field is invalid base64)",
+			method:         http.MethodPost,
+			body:           newPushPubSubRequestRawData("!@#$ThisIsNotBase64"),
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:   "payload unmarshalling error (decoded data is not valid DevicePushPayload JSON)",
+			method: http.MethodPost,
+			body:   newPushPubSubRequestRawData(base64.StdEncoding.EncodeToString([]byte("this is not device push payload json"))),
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "missing Title in payload",
+			method:         http.MethodPost,
+			body:           newPushPubSubRequest(DevicePushPayload{Body: "Body", Token: "token-no-title"}),
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "missing Body in payload",
+			method:         http.MethodPost,
+			body:           newPushPubSubRequest(DevicePushPayload{Title: "Title", Token: "token-no-body"}),
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "missing Token in payload",
+			method:         http.MethodPost,
+			body:           newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body"}),
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "empty HTTP request body",
+			method:         http.MethodPost,
+			body:           []byte{},
+			expectedStatus: http.StatusNoContent,
+		},
+		{
+			name:           "HTTP request body is JSON null",
+			method:         http.MethodPost,
+			body:           []byte("null"),
+			expectedStatus: http.StatusNoContent,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &MockFCMClient{MockSendToToken: tt.mockFunc}
-			handler := new(PushDeviceHandler).WithMock(mock)
+			// Use handlers.MockFCMClient from handlers/mock_test.go
+			mockClient := &handlers.MockFCMClient{
+				MockSendToToken: tt.mockSendFunc,
+			}
 
-			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBuffer(tt.body))
+			// The PushDeviceHandler type is from the dot-imported "handlers" package.
+			handler := new(PushDeviceHandler).WithMock(mockClient)
+
+			req := httptest.NewRequest(tt.method, "/", bytes.NewBuffer(tt.body))
 			rr := httptest.NewRecorder()
 
 			handler.ServeHTTP(rr, req)
+
 			if rr.Code != tt.expectedStatus {
-				t.Errorf("Status = %v, want %v. Body: %s", rr.Code, tt.expectedStatus, rr.Body.String())
+				t.Errorf("Handler returned wrong status code for '%s': got %v want %v. Body: %s",
+					tt.name, rr.Code, tt.expectedStatus, rr.Body.String())
 			}
 		})
-	}
-}
-
-func TestPushDeviceHandler_ServeHTTP_InvalidMethod(t *testing.T) {
-	mock := new(MockFCMClient)
-	handler := new(PushDeviceHandler).WithMock(mock)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Errorf("Expected status %v for GET, got %v", http.StatusMethodNotAllowed, rr.Code)
 	}
 }
