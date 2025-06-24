@@ -1,5 +1,13 @@
 package handlers
 
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+)
+
 // PubSubInternalMessage はPub/SubからのPushリクエストのメッセージ部分の内部構造体です。
 // PubSubPushRequest の Message フィールドとして使用されます。
 type PubSubInternalMessage struct {
@@ -16,8 +24,23 @@ type PubSubPushRequest struct {
 	Subscription string                `json:"subscription"`
 }
 
-// 注意: Base64デコード後の実際の業務ペイロードを表す構造体
-// (例: DevicePushPayload, TopicPushPayload) は、
-// それぞれのハンドラファイル (push_device_handler.go, push_topic_handler.go) 内で
-// 次のステップで定義（またはリネーム）します。
-// このファイルはPub/Sub Pushリクエストのエンベロープ構造のみを定義します。
+func decodeData(body io.Reader) ([]byte, error) {
+	var pubSubReq PubSubPushRequest
+	if err := json.NewDecoder(body).Decode(&pubSubReq); err != nil {
+		return nil, fmt.Errorf("decoding Pub/Sub envelope: %v", err)
+	}
+
+	log.Printf("PushDeviceHandler: Received Pub/Sub message ID %s from subscription %s published at %s",
+		pubSubReq.Message.MessageID, pubSubReq.Subscription, pubSubReq.Message.PublishTime)
+
+	if pubSubReq.Message.Data == "" {
+		return nil, fmt.Errorf("Pub/Sub message data is empty")
+	}
+
+	decodedData, err := base64.StdEncoding.DecodeString(pubSubReq.Message.Data)
+	if err != nil {
+		return nil, fmt.Errorf("decoding base64 data: %w", err)
+	}
+
+	return decodedData, nil
+}
