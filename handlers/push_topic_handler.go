@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/base64" // Base64デコードのためにインポート
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -33,57 +33,55 @@ func NewPushTopicHandler(fc *fcm.Client) *PushTopicHandler {
 // ServeHTTP はHTTPリクエストを処理します。
 func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		log.Printf("PushTopicHandler: Invalid request method: %s\n", r.Method)
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed) // Reverted to original behavior
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var pubSubReq PubSubPushRequest
-	if err := json.NewDecoder(r.Body).Decode(&pubSubReq); err != nil {
-		log.Printf("PushTopicHandler: Error decoding Pub/Sub envelope: %v\n", err)
-		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
-	}
-
-	log.Printf("PushTopicHandler: Received Pub/Sub message ID %s from subscription %s published at %s\n",
-		pubSubReq.Message.MessageID, pubSubReq.Subscription, pubSubReq.Message.PublishTime)
-
-	if pubSubReq.Message.Data == "" {
-		log.Println("PushTopicHandler: Pub/Sub message data is empty. Acking.")
-		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
-	}
-
-	decodedData, err := base64.StdEncoding.DecodeString(pubSubReq.Message.Data)
+	decodedData, err := decodeData(r.Body)
 	if err != nil {
-		log.Printf("PushTopicHandler: Error decoding base64 data: %v\n", err)
+		log.Printf("PushDeviceHandler: decoding data: %v", err)
 		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
+		return
 	}
 
+	messageID, err := h.send(decodedData)
+	if err != nil {
+		if IsRetryable(err) {
+			http.Error(w, "Failed to send notification via FCM (retryable)", http.StatusInternalServerError) // Nack
+		} else {
+			w.WriteHeader(http.StatusNoContent) // Ack
+		}
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "processed",
+		"message_id": messageID,
+	}); err != nil {
+		log.Printf("PushDeviceHandler: Error encoding success response: %v\n", err)
+	}
+}
+
+func (h *PushTopicHandler) send(decodedData []byte) (string, error) {
 	var payload TopicPushPayload
 	if err := json.Unmarshal(decodedData, &payload); err != nil {
-		log.Printf("PushTopicHandler: Error unmarshalling actual payload: %v. Decoded data was: %s\n", err, string(decodedData))
-		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
+		return "", fmt.Errorf("unmarshalling payload: %v. Decoded data was: %s", err, string(decodedData))
 	}
 
 	if payload.Title == "" {
-		log.Println("PushTopicHandler: Title is required in payload")
-		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
+		return "", fmt.Errorf("title is required in payload")
 	}
 
 	if payload.Body == "" {
-		log.Println("PushTopicHandler: Body is required in payload")
-		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
+		return "", fmt.Errorf("body is required in payload")
 	}
 
 	if payload.Topic == "" {
-		log.Println("PushTopicHandler: Topic is required in payload")
-		w.WriteHeader(http.StatusNoContent) // New: Ack with 204
-		return // bye
+		return "", fmt.Errorf("topic is required in payload")
 	}
 
 	log.Printf("PushTopicHandler: Sending notification to Topic: topic=%q title=%q data=%v",
@@ -92,31 +90,10 @@ func (h *PushTopicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// FCM送信
 	messageID, err := h.fcmClient.SendToTopic(context.Background(), payload.Topic, payload.Title, payload.Body, payload.CustomData)
 	if err != nil {
-		log.Printf("PushTopicHandler: Error sending FCM message to topic %s: %v.\n", payload.Topic, err) // Log error
-		if fcm.IsRetryableError(err) {
-			http.Error(w, "Failed to send notification via FCM (retryable)", http.StatusInternalServerError) // 500
-		} else {
-			// Non-retryable errors are treated as "processed" from the perspective of the pub/sub queue,
-			// so we return a 204 No Content to acknowledge the message without encouraging retries of this specific message.
-			log.Printf("PushTopicHandler: Non-retryable error for topic %s. Acknowledging message with 204 No Content.\n", payload.Topic)
-			w.WriteHeader(http.StatusNoContent) // 204
-		}
-		return
+		return "", fmt.Errorf("sending FCM message to topic %s: %v", payload.Topic, err)
 	}
 
-	log.Printf("PushTopicHandler: Successfully sent message ID %s to topic %s\n", messageID, payload.Topic)
+	log.Printf("PushTopicHandler: Successfully sent message ID %s to topic %s", messageID, payload.Topic)
 
-	w.Header().Set("Content-Type", "application/json")
-	// On success, status is OK.
-	w.WriteHeader(http.StatusOK) // 200
-
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":     "processed", // "processed" indicates successful delivery or a non-retryable FCM error.
-		"message_id": messageID,
-	}); err != nil {
-		// This error is about writing the HTTP response, not FCM itself.
-		log.Printf("PushTopicHandler: Error encoding success response: %v\n", err)
-		// The header might have already been written, so we can't easily change the status code here.
-		// The client will likely experience a broken response.
-	}
+	return "", nil
 }

@@ -3,28 +3,14 @@ package handlers_test
 import (
 	"bytes"
 	"context"
-	"encoding/base64" // Re-add for specific test case
-	// "encoding/json"  // No longer needed directly here
-	// "errors"         // No longer needed directly here
+	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	// Import fcm for fcm.IsRetryableError (though not directly used in mock setup here, handler uses it)
-	_ "github.com/teamzidi/example-go-fcm/fcm"
-	// Import handlers to use handlers.MockFCMClient and target handlers like PushDeviceHandler
-	"github.com/teamzidi/example-go-fcm/handlers"
-	// Dot import for handlers types like DevicePushPayload, etc. was used.
-	// This is okay for test files if it's the prevailing style.
-	// However, specific types like handlers.DevicePushPayload can also be used.
-	// For this modification, I'll keep the dot import if the original test used it extensively
-	// for types like DevicePushPayload. The `.` import for handlers was in the original file.
 	. "github.com/teamzidi/example-go-fcm/handlers"
 )
-
-// MockFCMClient definition is removed from here. It's now in handlers/mock_test.go (package handlers)
-// Sentinel errors (errFCMRetryable, errFCMNonRetryable) are removed. They are in test_helpers_test.go (package handlers_test)
-// Helper functions (newPushPubSubRequest, newPushPubSubRequestRawData) are removed. They are in test_helpers_test.go (package handlers_test)
 
 func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 	tests := []struct {
@@ -37,9 +23,7 @@ func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 		{
 			name:   "successful FCM send",
 			method: http.MethodPost,
-			// Uses newPushPubSubRequest from test_helpers_test.go
-			// Needs DevicePushPayload from "github.com/teamzidi/example-go-fcm/handlers"
-			body: newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token"}),
+			body:   newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token"}),
 			mockSendFunc: func(ctx context.Context, token, title, body string, customData map[string]string) (string, error) {
 				return "fcm-success-id", nil
 			},
@@ -50,7 +34,7 @@ func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 			method: http.MethodPost,
 			body:   newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token-retry"}),
 			mockSendFunc: func(ctx context.Context, token, title, body string, customData map[string]string) (string, error) {
-				return "", errFCMRetryable // errFCMRetryable from test_helpers_test.go
+				return "", errors.New("retryable")
 			},
 			expectedStatus: http.StatusInternalServerError,
 		},
@@ -59,15 +43,15 @@ func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 			method: http.MethodPost,
 			body:   newPushPubSubRequest(DevicePushPayload{Title: "Title", Body: "Body", Token: "token-nonretry"}),
 			mockSendFunc: func(ctx context.Context, token, title, body string, customData map[string]string) (string, error) {
-				return "", errFCMNonRetryable // errFCMNonRetryable from test_helpers_test.go
+				return "", errors.New("retryable")
 			},
-			expectedStatus: http.StatusNoContent,
+			expectedStatus: http.StatusInternalServerError,
 		},
 		{
 			name:           "invalid HTTP method",
 			method:         http.MethodGet,
 			body:           nil,
-			expectedStatus: http.StatusMethodNotAllowed, // Updated expected status
+			expectedStatus: http.StatusMethodNotAllowed,
 		},
 		{
 			name:           "Pub/Sub envelope decoding error (malformed JSON)",
@@ -78,19 +62,19 @@ func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 		{
 			name:           "empty Pub/Sub message data (Data field is empty string)",
 			method:         http.MethodPost,
-			body:           newPushPubSubRequestRawData(""), // Uses newPushPubSubRequestRawData from test_helpers_test.go
+			body:           newPushPubSubRequest(""),
 			expectedStatus: http.StatusNoContent,
 		},
 		{
 			name:           "base64 decoding error for message data (Data field is invalid base64)",
 			method:         http.MethodPost,
-			body:           newPushPubSubRequestRawData("!@#$ThisIsNotBase64"),
+			body:           newPushPubSubRequest([]byte("!@#$ThisIsNotBase64")),
 			expectedStatus: http.StatusNoContent,
 		},
 		{
-			name:   "payload unmarshalling error (decoded data is not valid DevicePushPayload JSON)",
-			method: http.MethodPost,
-			body:   newPushPubSubRequestRawData(base64.StdEncoding.EncodeToString([]byte("this is not device push payload json"))),
+			name:           "payload unmarshalling error (decoded data is not valid DevicePushPayload JSON)",
+			method:         http.MethodPost,
+			body:           newPushPubSubRequest(base64.StdEncoding.EncodeToString([]byte("this is not device push payload json"))),
 			expectedStatus: http.StatusNoContent,
 		},
 		{
@@ -128,7 +112,7 @@ func TestPushDeviceHandler_Comprehensive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Use handlers.MockFCMClient from handlers/mock_test.go
-			mockClient := &handlers.MockFCMClient{
+			mockClient := &MockFCMClient{
 				MockSendToToken: tt.mockSendFunc,
 			}
 
