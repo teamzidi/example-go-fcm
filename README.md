@@ -13,15 +13,22 @@ Cloud Runでの動作を想定しています。
 
 - `main.go`: アプリケーションのエントリーポイント。HTTPサーバー、ルーティングなど。
 - `handlers/`: HTTPリクエストハンドラ。
-  - `push_device_handler.go`: 指定デバイストークンへのPub/Sub Push通知受信・処理。
-  - `push_topic_handler.go`: 指定FCMトピックへのPub/Sub Push通知受信・処理。
-  - `fcm_client_config.go`: 本番用FCMクライアント設定 (`//go:build !test_fcm_mock`)。`fcm.Client` への型エイリアスとファクトリ関数を定義。
-  - `fcm_client_config_mock.go`: テスト用モックFCMクライアント設定 (`//go:build test_fcm_mock`)。モック版`fcmHandlerClient`とそのファクトリ関数を定義。
+  - `common_push_types.go`: Pub/Subからのリクエストデータ構造など、プッシュ通知関連の共通型定義。
+  - `handlers.go`: `/health`エンドポイントなど、共通のハンドラ。
+  - `handlers_mock.go`: `FCMClient`インターフェースのモック実装など、テスト用のモックを提供 (`//go:build test_fcm_mock`)。
+  - `push_device_handler.go`: 指定デバイストークンへのPub/Sub Push通知受信・処理 (`/pubsub/push/device`)。
+  - `push_topic_handler.go`: 指定FCMトピックへのPub/Sub Push通知受信・処理 (`/pubsub/push/topic`)。
+  - `push_device_handler_test.go`: `push_device_handler.go`のユニットテスト。
+  - `push_topic_handler_test.go`: `push_topic_handler.go`のユニットテスト。
+  - `mock_test.go`: モックを使用したハンドラのテスト。
+  - `testhelpers_test.go`: テストコード用のヘルパー関数群。
 - `fcm/`: FCM関連処理。
-  - `fcm_client.go`: FCMクライアントの本番実装（`Client`構造体、`NewClient`、`SendToToken`、`SendToTopic`メソッド）。
+  - `fcm_client.go`: `FCMClient`インターフェースと、Firebase Admin SDKを利用したFCMクライアントの本番実装を提供。
 - `Dockerfile`: アプリケーションのコンテナイメージをビルドするためのファイル。
 - `fcm_topic.md`: FCMトピックメッセージング機能に関する詳細説明。
-- `*_test.go`: 各パッケージのユニットテストファイル。
+- `go.mod`, `go.sum`: Goモジュールの依存関係定義ファイル。
+- `push_token.sh`, `push_topic.sh`: ローカルテスト用のPub/Subメッセージ送信スクリプト例。
+- `*_test.go`: 各パッケージのユニットテストファイル (上記`handlers/`内で具体的に記載したものを除く一般的な表現)。
 
 ## APIエンドポイント
 
@@ -30,32 +37,51 @@ Cloud Runでの動作を想定しています。
 これらのエンドポイントは、Pub/SubサブスクリプションのPush先として設定します。直接呼び出すことは通常ありません。
 
 - `POST /pubsub/push/device`: 指定された単一のデバイストークンに通知を送信します。
-  - リクエストボディ (Pub/Subメッセージの `message.data` にBase64エンコードされて格納されるJSON):
+  - リクエストボディ (Pub/Subメッセージの `message.data` にBase64エンコードされて格納されるJSON。実際のペイロードは `handlers.DevicePushPayload` を参照):
     ```json
     {
-      "title": "個別通知のタイトル (必須)",
-      "body": "個別通知の本文 (必須)",
+      "title": "通知のタイトル (必須)",
+      "body": "通知の本文 (必須)",
       "token": "your_single_device_token", // 送信対象のデバイストークン (必須、文字列)
       "custom_data": { // オプショナル: アプリ固有の追加データ。FCMメッセージのデータペイロードとして送信されます。
         "key1": "value1"
+      }
+    }
     ```
-    - 成功 (200 OK): FCMへの送信処理結果（メッセージID、トークン）を含むJSON。
-    - エラー (必須フィールド欠如など) (400 Bad Request): エラーメッセージ。
-    - エラー (FCM送信失敗時) (503 Service Unavailable): Pub/Subに再試行を促します。
+    - 成功 (200 OK): FCMへの送信処理が成功した場合、以下のJSONを返します。
+      ```json
+      {
+        "status": "processed",
+        "message_id": "fcm_message_id"
+      }
+      ```
+    - 成功 (204 No Content): リクエストのデコード失敗時や、FCMへの送信が非リトライ可能なエラーで失敗した場合に返します。Pub/Subメッセージはackされます。
+    - エラー (必須フィールド欠如など) (400 Bad Request): リクエストの形式が不正な場合 (このドキュメントで示すJSON構造ではなく、Pub/Subのエンベロープメッセージ自体に問題がある場合など) や、ペイロード内の必須フィールドが不足している場合に、エラーメッセージと共に返されることがあります。ただし、現在の実装では必須フィールド不足は多くの場合204 No Contentでackされます。
+    - エラー (FCM送信失敗時) (500 Internal Server Error): FCMへの送信がリトライ可能なエラーで失敗した場合に返します。Pub/Subに再試行を促します (nack)。
 
 - `POST /pubsub/push/topic`: 指定されたFCMトピックに通知を送信します。
-  - リクエストボディ (Pub/Subメッセージの `message.data` にBase64エンコードされて格納されるJSON):
+  - リクエストボディ (Pub/Subメッセージの `message.data` にBase64エンコードされて格納されるJSON。実際のペイロードは `handlers.TopicPushPayload` を参照):
     ```json
     {
-      "title": "トピック通知のタイトル (必須)",
-      "body": "トピック通知の本文 (必須)",
+      "title": "通知のタイトル (必須)",
+      "body": "通知の本文 (必須)",
       "topic": "your_target_topic_name", // 送信対象のFCMトピック名 (必須)
       "custom_data": { // オプショナル: アプリ固有の追加データ。FCMメッセージのデータペイロードとして送信されます。
         "key1": "value1"
+      }
+    }
     ```
-    - 成功 (200 OK): FCMへの送信結果（メッセージID、トピック名）を含むJSON。
-    - エラー (必須フィールド欠如など) (400 Bad Request): エラーメッセージ。
-    - エラー (FCM送信失敗時) (503 Service Unavailable): Pub/Subに再試行を促します。
+    - 成功 (200 OK): FCMへの送信処理が成功した場合、以下のJSONを返します。
+      ```json
+      {
+        "status": "processed",
+        "message_id": "fcm_message_id"
+      }
+      ```
+      (注意: 現在の `push_topic_handler.go` の実装では、成功時の `message_id` が空文字列になっています。これは修正されるべき点です。)
+    - 成功 (204 No Content): リクエストのデコード失敗時や、FCMへの送信が非リトライ可能なエラーで失敗した場合に返します。Pub/Subメッセージはackされます。
+    - エラー (必須フィールド欠如など) (400 Bad Request): リクエストの形式が不正な場合や、ペイロード内の必須フィールドが不足している場合に、エラーメッセージと共に返されることがあります。ただし、現在の実装では必須フィールド不足は多くの場合204 No Contentでackされます。
+    - エラー (FCM送信失敗時) (500 Internal Server Error): FCMへの送信がリトライ可能なエラーで失敗した場合に返します。Pub/Subに再試行を促します (nack)。
 
 - `GET /health`: ヘルスチェック用エンドポイント。
   - 成功レスポンス (200 OK):
@@ -152,9 +178,8 @@ FCMトピックメッセージングのより詳細な説明については、[F
    Pub/SubからのPush通知をローカルで受信するには、ローカル環境を外部公開するためのトンネリングツール（例: [ngrok](https://ngrok.com/)）が必要です。ngrokで取得した公開URL（例: `https://xxxx.ngrok.io/pubsub/push/device`）をPub/SubのPushエンドポイントとして設定します。
 
 ### テストの実行
-(変更なし、ただし内容は現在の構成を反映している)
 ユニットテストを実行するには、プロジェクトのルートディレクトリで以下のコマンドを実行します。
-`test_fcm_mock` ビルドタグを指定することで、FCMクライアントがモック実装（`handlers/fcm_client_config_mock.go` で定義）に置き換わり、実際のFCMサーバーへの通信なしにテストが行われます。
+`test_fcm_mock` ビルドタグを指定することで、HTTPハンドラが使用する `FCMClient` インターフェースの実装が、実際のFCMサーバーと通信する代わりに `handlers/handlers_mock.go` で定義されたモック実装 (`MockFCMClient`) に置き換わります。これにより、外部APIへの依存なしにハンドラのロジックをテストできます。
 
 ```bash
 go test -tags=test_fcm_mock ./...
@@ -183,9 +208,12 @@ docker build -t your-image-name .
 
 ## デバイストークンのバリデーション
 
-登録されるデバイストークンには以下の簡易的なバリデーションが適用されます。
-- 空白文字のみでないこと。
-- 最大長: 4096文字。
+デバイストークンは、Pub/Subメッセージ内のペイロードで送信される際に、以下のバリデーションが `handlers/push_device_handler.go` 内で適用されます。
+- **必須チェック**: トークンが空文字列でないこと。
+  - `payload.Token == ""` の形式でチェックされます。
+- **最大長**: 現在の実装では、デバイストークンの最大長に関する明示的なバリデーションは行われていません。FCM自体のトークン長の制約（通常4KB程度）に依存します。ドキュメントに記載されていた「最大長: 4096文字」のチェックは現在のコードには含まれていません。
+
+このため、非常に長いトークンが指定された場合の挙動はFCMライブラリまたはFCMサーバー側のバリデーションに委ねられます。
 
 ## 注意事項
 - **デバイストークンの扱い**: このアプリケーションはデバイストークンをサーバー側に保存・キャッシュしません。通知の送信対象（トークンまたはトピック）は、Pub/Subメッセージで都度指定される必要があります。
